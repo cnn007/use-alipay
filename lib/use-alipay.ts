@@ -4,13 +4,35 @@ import axios, {Axios} from "axios";
 import {AlipayRequest, AlipayRequestOptions, CreateOrderRequest, CreateOrderResponse} from "./alipay";
 import * as https from "https";
 
-export const DEFAULT_ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do";
+export const ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do";
+
+// The default sign type
+export const RSA2 = "RSA2";
+
+// Legacy sign type
+export const RSA = "RSA";
 
 export type AlipaySignType = "RSA2" | "RSA";
 
+export interface Cert {
+    path?: string;
+    raw?: string | Buffer;
+}
+
 export interface AlipayConfig {
     appId: string;
+
+    /**
+     * Oauth token
+     *
+     * @see https://opendocs.alipay.com/isv/10467/xldcyq
+     */
     appAuthToken?: string;
+
+    /**
+     * App private key
+     */
+    appPrivateKey: string;
 
     signType?: AlipaySignType;
 
@@ -18,6 +40,10 @@ export interface AlipayConfig {
     appCertPath: string;
     alipayPublicCertPath: string;
     alipayRootCertPath: string;
+
+    appPublicKeyCert: Cert;
+    alipayPublicKeyCert: Cert;
+    alipayRootCert: Cert;
 
     // AES key
     encryptKey?: string;
@@ -47,6 +73,9 @@ export class Alipay {
 
     signType: AlipaySignType;
 
+    /**
+     * AES key
+     */
     encryptKey?: string;
 
     // version is fixed
@@ -74,8 +103,8 @@ export class Alipay {
         this.baseNotifyURL = config.baseNotifyURL;
 
         const {
-            gateway = DEFAULT_ALIPAY_GATEWAY,
-            signType = "RSA2",
+            gateway = ALIPAY_GATEWAY,
+            signType = RSA2,
             charset = "utf-8",
             version = "1.0",
             format = "JSON",
@@ -115,12 +144,22 @@ export class Alipay {
         this.axios.interceptors.response.use((axiosResponse) => {
             const {config} = axiosResponse;
 
+
+
         });
     }
 
     setAppAuthToken(appAuthToken: string): Alipay {
         this.appAuthToken = appAuthToken;
         return this;
+    }
+
+    signRequest() {
+
+    }
+
+    verifyResponse() {
+
     }
 
     // Sign a request
@@ -148,6 +187,26 @@ export class Alipay {
         } = this;
 
 
+        biz_content = JSON.stringify(request);
+        if (requestOpts.encrypt && this.encryptKey) {
+            biz_content = "";
+        }
+
+        // sort
+        
+        // buffer
+
+        let buf = new Buffer(charset);
+
+        // the order is fixed ...
+
+
+        // sign the buffer
+
+        sign = "";
+
+
+
 
         return {
             app_id,
@@ -163,7 +222,6 @@ export class Alipay {
 
         };
     }
-
 
     // api: xx
     async createOrder(cor: CreateOrderRequest): Promise<CreateOrderResponse> {
