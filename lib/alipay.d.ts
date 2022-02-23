@@ -1,4 +1,8 @@
+export interface AlipayRequestMethod {
+    name: string;
 
+    options: AlipayRequestOptions;
+}
 
 export interface AlipayResponseBase {
     code: string;
@@ -27,24 +31,17 @@ export interface AlipayRequest {
     app_auth_token?: string;
     biz_content: string;
     notify_url?: string;
+    return_url?: string;
+    app_cert_sn?: string;
+    alipay_root_cert_sn?: string;
 }
 
 export interface AlipayRequestOptions {
-    method: string;
-
     encrypt?: boolean;
 
     notify?: boolean;
-
-    responseKey?: string;
-
 }
 
-export const ALIPAY_DEFAULT_REQUEST_OPTS: AlipayRequestOptions = {
-    encrypt: false,
-    notify: false,
-    responseKey: undefined,
-};
 
 export interface Goods {
     goods_id: string;
@@ -56,7 +53,11 @@ export interface Goods {
     show_url?: string;
 }
 
-export interface CreateOrderRequest {
+export interface AlipayRequestBody<T> {
+    response?: T;
+}
+
+export interface CreateOrderRequest<CreateOrderResponse> {
     out_trade_no: string;
 
     total_amount: number;
