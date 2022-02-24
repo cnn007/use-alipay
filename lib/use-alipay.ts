@@ -391,7 +391,7 @@ export function useAlipay(config: AlipayConfig,
             }
         });
 
-        rt.post("/sign/:method", (req, resp) => {
+        unsafe.post("/sign/:method", (req, resp) => {
             const method = req.params.method;
             resp.json(alipay.sign(method, req.body));
         });
