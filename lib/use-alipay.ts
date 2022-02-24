@@ -178,14 +178,15 @@ export class Alipay {
         }
 
         const {requestTimeoutMs, keepAlive = true, proxy} = options;
-        const pkg = require("../package.json");
+        // TODO How to get version from package.json?
+        // const pkg = require("../../package.json");
 
         this.axios = axios.create({
             baseURL: gateway,
             timeout: requestTimeoutMs,
             proxy,
             headers: {
-                "User-Agent": `use-alipay/${pkg.version}`,
+                "User-Agent": "use-alipay",
             },
             httpsAgent: new https.Agent({
                 keepAlive,
