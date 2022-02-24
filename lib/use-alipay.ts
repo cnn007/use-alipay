@@ -205,7 +205,7 @@ export class Alipay {
         this.requestOptionsMap = new Map<string, AlipayRequestOptions>();
     }
 
-    private getRequestOptions(method: string): AlipayRequestOptions {
+    getRequestOptions(method: string): AlipayRequestOptions {
         return this.requestOptionsMap.get(method) || DEFAULT_REQUEST_OPTS;
     }
 
@@ -221,14 +221,24 @@ export class Alipay {
     }
 
     private async verifyResponse(response: AxiosResponse) {
-        // response.request;
+        // TODO Verify/decrypt response
 
-        console.log("response", response.status, response.headers, response.data);
+        // extract the xxx_response, and set it as response data
+        const data = response.data;
+        if (typeof data === "object") {
+            for (let k of Object.keys(data)) {
+                if (k.endsWith("_response")) {
+                    response.data = data[k];
+                    break;
+                }
+            }
+        }
+
 
         return response;
     }
 
-    private encrypt(data: string | Buffer): string {
+    encrypt(data: string | Buffer): string {
         if (typeof this.encryptKey === "string") {
             const iv = Buffer.alloc(16, 0);
             const key = Buffer.from(this.encryptKey, "base64");
@@ -240,7 +250,7 @@ export class Alipay {
         }
     }
 
-    private decrypt(data: string): string {
+    decrypt(data: string): string {
         if (typeof this.encryptKey === "string") {
             const key = Buffer.from(this.encryptKey, "base64");
             const iv = Buffer.alloc(16, 0);
@@ -329,7 +339,6 @@ export class Alipay {
     }
 
     async request<Req, Resp>(method: string, bizContent: Req): Promise<Resp> {
-        console.log("method", method, "biz_content", bizContent);
         return this.axios.post(method, bizContent).then(response => response.data);
     }
 
@@ -361,10 +370,8 @@ export function useAlipay(config: AlipayConfig,
             if (typeof method === "string") {
                 alipay.request(method, bizContent)
                     .then(r => resp.json(r))
-                    .catch((e) => {
-                        resp.status(500).end();
-                        console.log("submit", e);
-                    });
+                    .catch(() => resp.status(500).end());
+
             } else {
                 resp.status(400).end();
             }
@@ -377,10 +384,7 @@ export function useAlipay(config: AlipayConfig,
             if (typeof requestOptions.onNotify === "function") {
                 requestOptions.onNotify(req.body, alipay)
                     .then(() => resp.send(SUCCESS))
-                    .catch((e) => {
-                        resp.send(ERROR);
-                        console.log(e);
-                    });
+                    .catch(() => resp.send(ERROR));
             } else {
                 resp.send(SUCCESS);
             }
@@ -404,5 +408,4 @@ export function useAlipay(config: AlipayConfig,
     }
 
     return alipay;
-
 }
