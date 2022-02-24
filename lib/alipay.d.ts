@@ -71,14 +71,14 @@ export interface AlipayRequest {
 type AsyncNotifyHandler = (notifyContent: any, alipay: Alipay) => Promise<any>;
 
 export interface AlipayRequestOptions {
-    encrypt?: boolean;
+    readonly encrypt?: boolean;
 
-    notify?: boolean;
+    readonly notify?: boolean;
 
     /**
      * A callback when alipay notify
      */
-    onNotify?: AsyncNotifyHandler;
+    readonly onNotify?: AsyncNotifyHandler;
 }
 
 export interface AlipayResponseBase {
