@@ -1,22 +1,58 @@
-export interface AlipayRequestMethod {
-    name: string;
+/*
+ *
+ */
 
-    options: AlipayRequestOptions;
-}
+import {PrivateKeyInput} from "crypto";
+import {Buffer} from "buffer";
+import {Alipay} from "./use-alipay";
 
-export interface AlipayResponseBase {
-    code: string;
-    msg: string;
-}
+export type AlipaySignType = "RSA2" | "RSA";
 
-export interface AlipayErrorResponse extends AlipayResponseBase {
-    sub_code?: string;
-    sub_msg?: string;
-}
+export interface AlipayConfig {
+    appId: string;
 
-export interface AlipayResponse {
-    sign: string;
+    /**
+     * @see https://opendocs.alipay.com/isv/10467/xldcyq
+     */
+    appAuthToken?: string;
 
+    /**
+     * App private key
+     */
+    appPrivateKey: string | Buffer | PrivateKeyInput;
+
+    signType?: AlipaySignType;
+
+    appPublicKey?: string | Buffer;
+    alipayPublicKey?: string | Buffer;
+    alipayRootPublicKey?: string | Buffer;
+
+    /**
+     * AES key.
+     *
+     * @see https://opendocs.alipay.com/common/02mse3
+     */
+    encryptKey?: string;
+    /**
+     * default: base64
+     */
+    encryptKeyEncoding?: string;
+
+    /**
+     * AES encrypt algorithm.
+     *
+     * default: AES/CBC/PKCS5Padding
+     */
+    encryptAlgorithm?: string;
+
+    baseNotifyURL?: string;
+
+    gateway?: string;
+    version?: string;
+    format?: string;
+    charset?: string;
+
+    requestOptionsMap?: Record<string, AlipayRequestOptions>;
 }
 
 export interface AlipayRequest {
@@ -24,7 +60,7 @@ export interface AlipayRequest {
     method: string;
     format?: string;
     charset: string;
-    sign_type: "RSA2" | "RSA";
+    sign_type?: AlipaySignType;
     sign: string;
     timestamp: string;
     version: string;
@@ -36,52 +72,29 @@ export interface AlipayRequest {
     alipay_root_cert_sn?: string;
 }
 
+type AsyncNotifyHandler = (notifyContent: any, alipay: Alipay) => Promise<any>;
+
 export interface AlipayRequestOptions {
     encrypt?: boolean;
 
     notify?: boolean;
+
+    /**
+     * A callback when alipay notify
+     */
+    onNotify?: AsyncNotifyHandler;
 }
 
+export interface AlipayResponseBase {
+    code: string;
+    msg: string;
 
-export interface Goods {
-    goods_id: string;
-    goods_name: string;
-    quantity: number;
-    price: number;
-    goods_category?: string;
-    categories_tree?: string;
-    show_url?: string;
+    // If sub code exists, you must be in trouble
+    sub_code?: string;
+    sub_msg?: string;
 }
 
-export interface AlipayRequestBody<T> {
-    response?: T;
-}
-
-export interface CreateOrderRequest<CreateOrderResponse> {
-    out_trade_no: string;
-
-    total_amount: number;
-
-    subject: string;
-
-    product_code?: string;
-
-    seller_id?: string;
-
-    body?: string;
-
-    goods_detail?: Goods[];
-
-    discountable_amount?: number;
-
-    store_id?: string;
-    operator_id?: string;
-    terminal_id?: string;
-
-    merchant_order_no?: string;
-}
-
-export interface CreateOrderResponse extends AlipayResponse {
-    out_trade_no: string;
-    qr_code: string;
+export interface AlipayResponse {
+    sign: string;
+    alipay_cert_sn?: string;
 }

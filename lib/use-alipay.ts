@@ -1,29 +1,54 @@
-import {Express, Router} from "express";
-import axios, {Axios, AxiosRequestConfig, AxiosResponse} from "axios";
-import {AlipayRequest, AlipayRequestOptions, AlipayResponse, CreateOrderRequest, CreateOrderResponse} from "./alipay";
-import * as https from "https";
+/*
+ *
+ */
+
 
 import {
-    createSign, createCipheriv, createDecipheriv, createPrivateKey,
+    createSign, createCipheriv, createDecipheriv, createPrivateKey, createHash,
     X509Certificate, KeyObject, PrivateKeyInput,
 } from "crypto";
 import {Buffer} from "buffer";
+import * as https from "https";
+import * as http from "http";
 
+import {Router, Application} from "express";
+import axios, {Axios, AxiosRequestConfig, AxiosResponse} from "axios";
 import {format as formatDate} from "date-fns";
 
-// const {X509Certificate} = await import("crypto");
+import {AlipaySignType, AlipayConfig, AlipayRequest, AlipayRequestOptions} from "./alipay";
 
-export const ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do";
+// -- Constants
 
-// The default sign type
-export const RSA2 = "RSA2";
+const ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do";
 
-// Legacy sign type
-export const RSA = "RSA";
+const DEFAULT_ALIPAY_SIGN_TYPE: AlipaySignType = "RSA2";
 
-const UTF8 = "utf-8";
+const ALIPAY_ROOT_CERT_SN = "687b59193f3f462dd5336e5abf83c5d8_02941eef3187dddf3d3b83462e1dfcf6";
 
-export type AlipaySignType = "RSA2" | "RSA";
+const SUCCESS = "success";
+
+const ERROR = "error";
+
+const DEFAULT_REQUEST_OPTS: AlipayRequestOptions = {
+    encrypt: false,
+    notify: false,
+};
+
+// -- End constants
+
+
+export function alipayCertSN(x509: X509Certificate): string {
+    const issuer = x509.issuer.split("\n").reverse().join(",");
+    const sn = BigInt(`0x${x509.serialNumber}`).toString(10);
+
+    return createHash("md5")
+        .update(issuer, "utf8")
+        .update(sn, "utf8")
+        .digest("hex");
+}
+
+
+// -- Types
 
 type Param = [string, string | undefined];
 
@@ -51,118 +76,49 @@ class ByteBuffer {
 
 }
 
-const UTF8_BUFFER_1M = Buffer.alloc(1024 * 1024, undefined, UTF8);
+// -- End types
 
-const DEFAULT_REQUEST_OPTS: AlipayRequestOptions = {
-    encrypt: false,
-    notify: false,
-};
-
-// format pem
-// algorithem rsa
-//
-
-// use-encrypt
-
-// encrypt, sign...
-// decrypt
-// verify
-// sign
-
-export interface Key {
-    key: string | Buffer | ArrayBuffer;
-    format?: "pem" | "der" | "jwk";
-    type?: "pkcs1" | "pkcs8" | "sec1";
-    encoding?: string;
-}
-
-export interface AlipayConfig {
-    appId: string;
-
-    /**
-     * Oauth token
-     *
-     * @see https://opendocs.alipay.com/isv/10467/xldcyq
-     */
-    appAuthToken?: string;
-
-    /**
-     * App private key
-     */
-    appPrivateKey: string | Buffer | PrivateKeyInput;
-
-    signType?: AlipaySignType;
-
-    appPublicKey?: string | Buffer;
-    alipayPublicKey?: string | Buffer;
-    alipayRootPublicKey?: string | Buffer;
-
-    /**
-     * AES key.
-     *
-     * @see https://opendocs.alipay.com/common/02mse3
-     */
-    encryptKey?: string;
-    /**
-     * default: base64
-     */
-    encryptKeyEncoding?: string;
-
-    /**
-     * AES encrypt algorithm.
-     *
-     * default: AES/CBC/PKCS5Padding
-     */
-    encryptAlgorithm?: string;
-
-    baseNotifyURL?: string;
-
-    gateway?: string;
-
-    version?: string;
-    format?: string;
-    charset?: string;
-}
 
 
 /**
- * The alipay sdk.
+ * The Alipay SDK.
  */
 export class Alipay {
 
-    axios: Axios;
+    private axios: Axios;
 
-    baseNotifyURL?: string;
+    private baseNotifyURL?: string;
 
-    appId: string;
+    private readonly appId: string;
 
-    appAuthToken?: string;
+    private appAuthToken?: string;
 
-    signType: AlipaySignType;
+    private signType: AlipaySignType;
 
     /**
      * AES key
      */
-    encryptKey?: string;
-
-    encryptKeyFormat?: string;
+    private encryptKey?: string;
 
     // version is fixed
-    version: string;
+    private version: string;
 
     // biz_content format, only accepts JSON
-    format: string;
+    private format: string;
 
-    charset: string;
+    private charset: string;
 
-    appPrivateKey: KeyObject;
-    appPublicKey?: KeyObject;
-    appPublicKeySN?: string;
-    alipayPublicKey?: KeyObject;
-    alipayRootPublicKey?: KeyObject;
-    alipayRootPublicKeySN?: string;
+    private appPrivateKey: KeyObject;
+    private appPublicKey?: KeyObject;
+    private appPublicKeySN?: string;
+    private alipayPublicKey?: KeyObject;
+    private alipayPublicKeySN?: string;
+    private alipayRootPublicKey?: KeyObject;
+    private alipayRootPublicKeySN?: string;
 
-    requestOptionsMap: Map<string, AlipayRequestOptions>;
+    private requestOptionsMap: Map<string, AlipayRequestOptions>;
+
+    private tmpBuffer = Buffer.alloc(1024 * 1024);
 
     constructor(config: AlipayConfig) {
 
@@ -171,10 +127,11 @@ export class Alipay {
             appAuthToken,
             baseNotifyURL,
             gateway = ALIPAY_GATEWAY,
-            signType = RSA2,
+            signType = DEFAULT_ALIPAY_SIGN_TYPE,
             charset = "utf-8",
             version = "1.0",
             format = "JSON",
+            encryptKey,
         } = config;
 
 
@@ -186,18 +143,26 @@ export class Alipay {
         this.charset = charset;
         this.format = format;
 
+        this.encryptKey = encryptKey;
         this.appPrivateKey = createPrivateKey(config.appPrivateKey);
 
+        let x509: X509Certificate;
         if (config.appPublicKey) {
-            this.appPublicKey = new X509Certificate(config.appPublicKey).publicKey;
-        }
+            x509 = new X509Certificate(config.appPublicKey);
+            this.appPublicKey = x509.publicKey;
+            this.appPublicKeySN = alipayCertSN(x509);
+            this.alipayRootPublicKeySN = ALIPAY_ROOT_CERT_SN;
 
+        }
         if (config.alipayPublicKey) {
-            this.alipayPublicKey = new X509Certificate(config.alipayPublicKey).publicKey;
-        }
+            x509 = new X509Certificate(config.alipayPublicKey);
+            this.alipayPublicKey = x509.publicKey;
+            this.alipayPublicKeySN = alipayCertSN(x509);
 
+        }
         if (config.alipayRootPublicKey) {
-            this.alipayRootPublicKey = new X509Certificate(config.alipayRootPublicKey).publicKey;
+            x509 = new X509Certificate(config.alipayRootPublicKey);
+            this.alipayRootPublicKey = x509.publicKey;
         }
 
 
@@ -206,62 +171,75 @@ export class Alipay {
             httpsAgent: new https.Agent({
                 keepAlive: true,
             }),
+            httpAgent: new http.Agent({
+                keepAlive: true,
+            }),
         });
 
-        this.axios.interceptors.request.use(this.signRequest);
-        this.axios.interceptors.response.use(this.verifyResponse);
+        this.axios.interceptors.request.use(async (config) => {
+            return this.signRequest(config);
+        });
+        this.axios.interceptors.response.use((response) => {
+            return this.verifyResponse(response);
+        });
 
         this.requestOptionsMap = new Map<string, AlipayRequestOptions>();
     }
 
-    signRequest(requestConfig: AxiosRequestConfig) {
-
-        let {data} = requestConfig;
-
-        const method = requestConfig.url || "";
-
-        requestConfig.params = this.sign(method, data);
-
-
+    private getRequestOptions(method: string): AlipayRequestOptions {
+        return this.requestOptionsMap.get(method) || DEFAULT_REQUEST_OPTS;
     }
 
-    verifyResponse(response: AxiosResponse) {
-        response.request;
+    private async signRequest(config: AxiosRequestConfig) {
 
+        let {data} = config;
+
+        const method = config.url || "";
+
+        config.params = this.sign(method, data);
+        config.url = undefined;
+        return config;
     }
 
-    encrypt(data: string): string {
+    private async verifyResponse(response: AxiosResponse) {
+        // response.request;
+
+        console.log("response", response.status, response.headers, response.data);
+
+        return response;
+    }
+
+    private encrypt(data: string | Buffer): string {
         if (typeof this.encryptKey === "string") {
             const iv = Buffer.alloc(16, 0);
             const key = Buffer.from(this.encryptKey, "base64");
-            return createCipheriv("aes-128-cbc", key, iv)
-                .update(data)
-                .toString("base64");
+            const cipher = createCipheriv("aes-128-cbc", key, iv);
+            cipher.update(data);
+            return cipher.final("base64");
         } else {
-            return data;
+            return ERROR;
         }
     }
 
-    decrypt(data: string): string {
+    private decrypt(data: string): string {
         if (typeof this.encryptKey === "string") {
             const key = Buffer.from(this.encryptKey, "base64");
             const iv = Buffer.alloc(16, 0);
-            return createDecipheriv("aes-128-cbc", key, iv)
-                .update(data, "base64")
-                .toString("utf8");
+            const decipher = createDecipheriv("aes-128-cbc", key, iv);
+            return decipher.final("utf8");
         } else {
-            return data;
+            return ERROR;
         }
     }
 
     // Sign a request
     sign(method: string, body: string | Object): AlipayRequest {
 
-        const requestOpts = this.requestOptionsMap.get(method) || DEFAULT_REQUEST_OPTS;
+        const requestOpts = this.getRequestOptions(method);
 
         let notify_url,
             sign,
-            timestamp = formatDate(new Date(), "YYYY-MM-DD HH:mm:ss"),
+            timestamp = formatDate(new Date(), "yyyy-MM-dd HH:mm:ss"),
             biz_content;
 
         if (requestOpts.notify && this.baseNotifyURL) {
@@ -275,11 +253,13 @@ export class Alipay {
             version,
             charset,
             signType: sign_type,
+            appPublicKeySN: app_cert_sn,
+            alipayRootPublicKeySN: alipay_root_cert_sn,
         } = this;
 
 
-        biz_content = JSON.stringify(body);
-        if (requestOpts.encrypt && this.encryptKey) {
+        biz_content = typeof biz_content === "string" ? biz_content : JSON.stringify(body);
+        if (requestOpts.encrypt) {
             biz_content = this.encrypt(biz_content);
         }
 
@@ -295,7 +275,7 @@ export class Alipay {
             ["biz_content", biz_content],
             ["app_cert_sn", this.appPublicKeySN],
             ["alipay_root_cert_sn", this.alipayRootPublicKeySN],
-            ["return_url", notify_url],
+            ["notify_url", notify_url],
         ];
 
         let buf: ByteBuffer = params.sort().reduce((b, p) => {
@@ -306,9 +286,9 @@ export class Alipay {
                     .write(p[1]);
             }
             return b;
-        }, new ByteBuffer(UTF8_BUFFER_1M));
+        }, new ByteBuffer(this.tmpBuffer));
 
-        sign = createSign(this.signType)
+        sign = createSign("RSA-SHA256")
             .update(buf.buf.slice(1, buf.pos))
             .sign(this.appPrivateKey, "base64");
 
@@ -324,12 +304,14 @@ export class Alipay {
             app_auth_token,
             biz_content,
             notify_url,
+            alipay_root_cert_sn,
+            app_cert_sn,
         };
     }
 
     async request<Req, Resp>(method: string, bizContent: Req): Promise<Resp> {
         console.log("method", method, "biz_content", bizContent);
-        return this.axios.post(method, bizContent);
+        return this.axios.post(method, bizContent).then(response => response.data);
     }
 
 }
@@ -337,42 +319,68 @@ export class Alipay {
 /**
  * Create alipay sdk
  */
-export function useAlipay(options: AlipayConfig, expressApp?: Express): Alipay {
+export function useAlipay(config: AlipayConfig, options: {
+    expressApp?: Application,
+    unsafeMountPoint?: string,
+    alipayMountPoint?: string,
+}): Alipay {
 
-    const alipay = new Alipay(options);
+    const alipay = new Alipay(config);
 
-    console.log("alipay is ready");
+    const {expressApp, alipayMountPoint = "/alipay", unsafeMountPoint = "/unsafe/alipay"} = options;
     if (expressApp) {
 
-        const r = Router();
+        const rt = Router();
+        const unsafe = Router();
 
-        console.log("unsafe");
-
-        r.post("/submit/:method", async (req, resp) => {
+        unsafe.post("/submit/:method", async (req, resp) => {
             // body is biz content
             const bizContent = req.body;
-            const {method} = req.query;
-            console.log("method", method, "body", bizContent);
+            const {method} = req.params;
 
             if (typeof method === "string") {
-                alipay.request(method, bizContent).then(r => resp.json(r)).catch(e => {
-                    resp.status(500).end();
-                });
+                alipay.request(method, bizContent)
+                    .then(r => resp.json(r))
+                    .catch((e) => {
+                        resp.status(500).end();
+                        console.log("submit", e);
+                    });
             } else {
-                resp.status(404).end();
+                resp.status(400).end();
             }
         });
 
-        r.post("/ack/:method", async (req, resp) => {
+        rt.post("/ack/:method", async (req, resp) => {
+            const method = req.params.method;
+            let requestOptions = alipay.getRequestOptions(method);
 
-            // Handle alipay notify
-
-
-            resp.send("success");
+            if (typeof requestOptions.onNotify === "function") {
+                requestOptions.onNotify(req.body, alipay)
+                    .then(() => resp.send(SUCCESS))
+                    .catch((e) => {
+                        resp.send(ERROR);
+                        console.log(e);
+                    });
+            } else {
+                resp.send(SUCCESS);
+            }
         });
 
+        rt.post("/sign/:method", (req, resp) => {
+            const method = req.params.method;
+            resp.json(alipay.sign(method, req.body));
+        });
 
-        expressApp.use("/alipay", r);
+        rt.post("/encrypt", (req, resp) => {
+            resp.send(alipay.encrypt(req.body));
+        });
+
+        unsafe.post("/decrypt", (req, resp) => {
+            resp.send(alipay.decrypt(req.body.toString()));
+        });
+
+        expressApp.use(alipayMountPoint, rt);
+        expressApp.use(unsafeMountPoint, unsafe);
     }
 
     return alipay;
