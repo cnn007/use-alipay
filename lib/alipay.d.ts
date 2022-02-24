@@ -1,7 +1,3 @@
-/*
- *
- */
-
 import {PrivateKeyInput} from "crypto";
 import {Buffer} from "buffer";
 import {Alipay} from "./use-alipay";
